@@ -2,31 +2,25 @@ import socket
 import threading
 import sys
 
-buf = []
-def get_input():
-    global buf
+def listen_to_server(conn: socket.socket):
     while True:
-        buf.append(input('>>> '))
+        data = conn.recv(1024)
+        if len(data) > 0:
+            print(f'Got message: {data}')
+        else:
+            break
+
 
 port = int(sys.argv[1])
 sock = socket.socket()
 sock.connect(('localhost', port))
-msg = threading.Thread(target=get_input)
-msg.start()
+listener = threading.Thread(target=listen_to_server, args=[sock])
+listener.start()
 while True:
-    data = sock.recv(1024)
-    if data:
-        print(f"Recieve message: {data} ")
-    while len(buf) > 0:
-        print("Есть что отправить")
-        sock.send(buf.pop().encode("utf-8"))
-        print("Отправлено")
-    
-
-
-#sock.send(b'hello, world!')
-
-data = sock.recv(1024)
-sock.close()
-
-print(data)
+    msg = input('>>> ')
+    if msg == '/exit':
+        sock.close()
+        listener.join(2)
+        break
+    bs = sock.send(msg.encode(encoding='utf-8'))
+    print(f'{bs} bytes sent!')
