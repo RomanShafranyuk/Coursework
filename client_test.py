@@ -1,31 +1,35 @@
 import socket
 import threading
 import sys
-
+import json
 def listen_to_server(conn: socket.socket):
     while True:
-        data = conn.recv(1024).decode(encoding='utf-8')
+        incoming = conn.recv(1024).decode(encoding='utf-8')
+        data = json.loads(incoming)
         if data == 'conn_close':
             break
         elif len(data) > 0:
-            print(f'Got message: {data}')
+            print(f'{data["from"]}: {data["text"]}')
         else:
             break
 
-username = 'dimadivan'
-port = 7001
+port, username = int(sys.argv[1]), sys.argv[2]
 sock = socket.socket()
 sock.connect(('localhost', port))
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
 sock.send(username.encode(encoding='utf-8'))
 while True:
-    msg = input('>>> ')
-    if msg == '/exit':
+    data = {"from" : "", "to" : "", "text" : ""}
+    data["from"] = username
+    data["to"] = input("Send to: ")
+    data["text"] = input('>>> ')
+    
+    if data["text"] == '/exit':
         print('Closing program...')
         sock.send(b'conn_close')
         listener.join()
         sock.close()
         break
-    bytes_count = sock.send(msg.encode(encoding='utf-8'))
+    bytes_count = sock.send(json.dumps(data).encode(encoding='utf-8'))
     print(f'{bytes_count} bytes sent!')

@@ -4,33 +4,54 @@ import json
 
 
 def handle_client(sock: socket.socket, addr):
-    global users_list, users_list_lock
+    global users_list, users_list_lock, message_storage
 
     username = sock.recv(20).decode(encoding='utf-8')
     print(f'[{username}] joined from {addr}!')
     users_list_lock.acquire()
-    users_list.append([username, sock])
+    users_list[0].append(username)
+    users_list[1].append(sock)
     users_list_lock.release()
-
+    
     while True:
-        data = sock.recv(1024)
-        if data.decode(encoding='utf-8') == 'conn_close':
+        incoming = sock.recv(1024).decode(encoding="utf-8")
+        data = json.loads(incoming)
+        if data["text"] == 'conn_close':
             break
         else:
-            sock.send(b'Echo: ' + data)
-    
+            #sock.send(b'Echo: ' + data["text"].encode(encoding="utf-8"))
+            message_storage_lock.acquire()
+            message_storage.append(data)
+            message_storage_lock.release()
+
     users_list_lock.acquire()
-    for i in range(len(users_list)):
-        if users_list[i][0] == username:
-            users_list.pop(i)
-            break
+    user_index = users_list[0].index(username)
+    users_list[0].pop(user_index)
+    users_list[1].pop(user_index)
     users_list_lock.release()
     sock.close()
 
 
-users_list = []
-users_list_lock = threading.Lock()
+def send_messages():
+    global users_list, users_list_lock, message_storage, message_storage_lock
+    while True:
+        message_storage_lock.acquire()
+        users_list_lock.acquire()
+        for msg in message_storage:
+                if msg["to"] in users_list[0]:
+                    ind = users_list[0].index(msg["to"])
+                    receiver_sock = users_list[1][ind]
+                    receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
+                    message_storage.remove(msg)
+                    break
+        message_storage_lock.release()
+        users_list_lock.release()
 
+
+users_list = [[],[]]
+users_list_lock = threading.Lock()
+message_storage_lock = threading.Lock()
+message_storage = []
 config = {}
 with open('server_config.json') as f:
     config = json.load(f)
@@ -38,6 +59,8 @@ server_socket = socket.socket()
 server_socket.bind((config['address'], config['port'])) # 127.0.0.1:7001
 server_socket.listen(10)
 print(f"[INFO] Listening on {config['address']}:{config['port']}")
+msg_thread = threading.Thread(target=send_messages)
+msg_thread.start()
 while True:
     client_socket, client_address = server_socket.accept()
     tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
