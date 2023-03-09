@@ -1,15 +1,17 @@
-import threading as thr
+import threading
 
-buf = []
-def input_thread():
-    global buf
-    while True:
-        buf.append(input('>>> '))
+test_lock = threading.Lock()
 
-it = thr.Thread(target=input_thread, args=())
-it.start()
+def child_thread():
+    global test_lock
+    print('child: aquire attempt')
+    test_lock.acquire()
+    print('child: aquired lock')
+    test_lock.release()
 
-while True:
-    if len(buf) > 0:
-        print('message got and handled')
-        print("~: ", buf.pop())
+print('parent: aquired lock')
+test_lock.acquire()
+tmp_thread = threading.Thread(target=child_thread)
+tmp_thread.start()
+input('Press Enter to release lock')
+test_lock.release()
