@@ -1,70 +1,70 @@
-#!/usr/bin/env python3
-import sys
 import socket
-import selectors
-import types
-
-sel  = selectors.DefaultSelector()
-
-def accept_wrapper(sock):
-    conn, addr = sock.accept()
-    print(f"Accepted connection from {addr}")
-    conn.setblocking(False)
-    data = types.SimpleNamespace(addr=addr, inb=b"", out=b"")
-    events = selectors.EVENT_READ | selectors.EVENT_WRITE
-    sel.register(conn, events, data=data)
+import threading
+import json
 
 
-def service_connection(key, mask):
-    sock = key.fileobj
-    data = key.data
-    if mask & selectors.EVENT_READ:
-        recv_data = sock.recv(1024)
-        if recv_data:
-            data.outb += recv_data
-        else:
-            print(f"Closing connection to {data.addr}")
-            sel.unregister(sock)
-            sock.close()
-    if mask & selectors.EVENT_WRITE:
-        if data.outb:
-            print(f"Echoing {data.outb!r} to {data.addr}")
-            sent = sock.send(data.outb)  # Should be ready to write
-            data.outb = data.outb[sent:]
+def handle_client(sock: socket.socket, addr):
+    global users_list, users_list_lock, message_storage
 
-if len(sys.argv) != 3:
-    print(f"Usage: {sys.argv[0]} <host> <port>")
-    sys.exit(1)
-
-host, port = sys.argv[1], int(sys.argv[2])
-lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-lsock.bind((host, port))
-print(f"Listening on {(host, port)}")
-lsock.setblocking(False)
-sel.register(lsock, selectors.EVENT_READ, data=None)
-
-try:
+    username = sock.recv(20).decode(encoding='utf-8')
+    print(f'[{username}] joined from {addr}!')
+    users_list_lock.acquire()
+    users_list[0].append(username)
+    users_list[1].append(sock)
+    users_list_lock.release()
+    
     while True:
-        events = sel.select(timeout=None)
-        for key, mask in events:
-            if key.data is None:
-                accept_wrapper(key.fileobj)
-            else:
-                service_connection(key, mask)
-except KeyboardInterrupt:
-    print("Caught keyboard interrupt, exiting")
-finally:
-    sel.close()
+        incoming = sock.recv(1024).decode(encoding="utf-8")
+        data = json.loads(incoming)
+        if data["text"] == 'conn_close':
+            break
+        else:
+            #sock.send(b'Echo: ' + data["text"].encode(encoding="utf-8"))
+            message_storage_lock.acquire()
+            message_storage.append(data)
+            message_storage_lock.release()
+
+    users_list_lock.acquire()
+    user_index = users_list[0].index(username)
+    users_list[0].pop(user_index)
+    users_list[1].pop(user_index)
+    users_list_lock.release()
+    sock.close()
 
 
+def send_messages():
+    global users_list, users_list_lock, message_storage, message_storage_lock
+    while True:
+        message_storage_lock.acquire()
+        users_list_lock.acquire()
+        for msg in message_storage:
+                if msg["to"] in users_list[0]:
+                    ind = users_list[0].index(msg["to"])
+                    receiver_sock = users_list[1][ind]
+                    receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
+                    message_storage.remove(msg)
+                    break
+        message_storage_lock.release()
+        users_list_lock.release()
 
 
-
-
-
-
-
-#HOST = '192.168.1.34'  # Standard loopback interface address (localhost)
-#PORT = 65432        # Port to listen on (non-privileged ports are > 1023)
-
-
+users_list = [[],[]]
+users_list_lock = threading.Lock()
+message_storage_lock = threading.Lock()
+message_storage = []
+config = {}
+with open('server_config.json') as f:
+    config = json.load(f)
+server_socket = socket.socket()
+server_socket.bind((config['address'], config['port'])) # 127.0.0.1:7001
+server_socket.listen(10)
+print(f"[INFO] Listening on {config['address']}:{config['port']}")
+msg_thread = threading.Thread(target=send_messages)
+msg_thread.start()
+while True:
+    client_socket, client_address = server_socket.accept()
+    tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
+    tmp_thread.start()
+    # tmp_thread.join()
+    # break
+server_socket.close()
