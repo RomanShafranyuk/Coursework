@@ -17,6 +17,7 @@ def handle_client(sock: socket.socket, addr):
         incoming = sock.recv(1024).decode(encoding="utf-8")
         data = json.loads(incoming)
         if data["text"] == 'conn_close':
+            sock.send(json.dumps({'text': 'conn_close'}).encode(encoding='utf-8'))
             break
         else:
             #sock.send(b'Echo: ' + data["text"].encode(encoding="utf-8"))
