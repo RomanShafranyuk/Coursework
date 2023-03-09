@@ -34,8 +34,10 @@ def handle_client(sock: socket.socket, addr):
 
 
 def send_messages():
-    global users_list, users_list_lock, message_storage, message_storage_lock
+    global users_list, users_list_lock, message_storage, message_storage_lock, closing_server_flag
     while True:
+        if closing_server_flag:
+            break
         message_storage_lock.acquire()
         users_list_lock.acquire()
         for msg in message_storage:
@@ -54,18 +56,26 @@ users_list_lock = threading.Lock()
 message_storage_lock = threading.Lock()
 message_storage = []
 config = {}
+closing_server_flag = False
 with open('server_config.json') as f:
     config = json.load(f)
 server_socket = socket.socket()
 server_socket.bind((config['address'], config['port'])) # 127.0.0.1:7001
 server_socket.listen(10)
 print(f"[INFO] Listening on {config['address']}:{config['port']}")
+print("[INFO] Press Ctrl+C to close server")
 msg_thread = threading.Thread(target=send_messages)
 msg_thread.start()
-while True:
-    client_socket, client_address = server_socket.accept()
-    tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
-    tmp_thread.start()
-    # tmp_thread.join()
-    # break
-server_socket.close()
+try:
+    while True:
+        client_socket, client_address = server_socket.accept()
+        tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
+        tmp_thread.start()
+except KeyboardInterrupt:
+    print('Closing server...')
+except Exception:
+    print('ERROR')
+finally:
+    closing_server_flag = True
+    msg_thread.join()
+    server_socket.close()
