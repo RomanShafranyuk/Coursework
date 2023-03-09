@@ -2,6 +2,7 @@ import socket
 import threading
 import sys
 import json
+
 def listen_to_server(conn: socket.socket):
     while True:
         incoming = conn.recv(1024).decode(encoding='utf-8')
