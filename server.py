@@ -21,6 +21,7 @@ def handle_client(sock: socket.socket, addr):
             break
         else:
             #sock.send(b'Echo: ' + data["text"].encode(encoding="utf-8"))
+            print(f"[INFO] Got new message {data}")
             message_storage_lock.acquire()
             message_storage.append(data)
             message_storage_lock.release()
@@ -41,6 +42,7 @@ def send_messages():
         message_storage_lock.acquire()
         users_list_lock.acquire()
         for msg in message_storage:
+                print(f"[INFO] Sending message {msg}")
                 if msg["to"] in users_list[0]:
                     ind = users_list[0].index(msg["to"])
                     receiver_sock = users_list[1][ind]
