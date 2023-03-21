@@ -7,26 +7,29 @@ import criptography
 def handle_client(sock: socket.socket, addr):
     global users_list, users_list_lock, message_storage
 
-    username = sock.recv(20).decode(encoding='utf-8')
+    username = sock.recv(20).decode(encoding='utf-8').strip()
     print(f'[{username}] joined from {addr}!')
     #ожидание приема ключа с клиента и вытягивание хэша с сообщения
     data = sock.recv(2080)
     key = data[:2048]
     hash = data[2048:]
+    print(hash)
     #Создание проверочного хэша и отправка его на клиент для проверки
-    h1 = criptography.hashing_key(hash)
+    h1 = criptography.hashing_key(hash).digest()
     sock.send(h1)
     #Ожидание сигнала-результата проверки 
-    check = sock.recv(10).decode("utf-8")
-    if check == "OK":
+    check = sock.recv(5).decode("utf-8")
+    if check == "OK   ":
         #отправка списка онлайн пользователей с ключами клиенту
         users_list_lock.acquire()
         users_list[0].append(username)
         users_list[1].append(sock)
         users_list[2].append(key)
         users_list_lock.release()
-        
-        sock.send(json.dumps({users_list}).encode(encoding='utf-8'))
+    
+
+
+       # sock.send(json.dumps(users_list[0]).encode(encoding='utf-8'))
 
 
     #     h3 = sock.recv(32)
@@ -46,23 +49,24 @@ def handle_client(sock: socket.socket, addr):
         incoming = sock.recv(1024).decode(encoding="utf-8")
         data = json.loads(incoming)
         if data["text"] == 'Online':
-            sock.send(json.dumps({users_list[0]}).encode('utf-8'))
+            print(f"[INFO] Sent users list: {users_list[0]}")
+            sock.send(json.dumps(users_list[0]).encode('utf-8'))
         #Обработка запроса ключа
-        if "Get_key" in data.keys():
+        elif "Get_key" in data.keys():
             #Находим индекс ключа нужного пользователя
             key_index = users_list.index(data["Get_key"])
-            hash_key = criptography.hashing_key(users_list[2][key_index])
+            hash_key = criptography.hashing_key(users_list[2][key_index].encode("utf-8")).digest()
             sock.send(json.dumps({'key': users_list[2][key_index] + hash_key}).encode("utf-8")) 
             #Принимаем проверочный хэш с клиента
             h_client = sock.recv(32)
             #Создаем проверочный хэш
-            h_check = criptography.hashing_key(hash_key)
+            h_check = criptography.hashing_key(hash_key).digest()
             #Проверка и отправка сигнала
-            if criptography.is_hash_equal(h_client):
+            if criptography.is_hash_equal(h_client, h_check):
                 sock.send("OK".encode("utf-8"))
             else:
                 sock.send("ERROR")
-        if data["text"] == 'conn_close':
+        elif data["text"] == 'conn_close':
             sock.send(json.dumps({'text': 'conn_close'}).encode(encoding='utf-8'))
             break
         else:
