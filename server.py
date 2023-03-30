@@ -3,136 +3,167 @@ import threading
 import json
 import criptography
 
-# осуществяет подключение клиентов и обмен ключами между ними
-def handle_client(sock: socket.socket, addr):
-    global users_list, users_list_lock, message_storage
 
+def handle_client(sock: socket.socket, addr: tuple):
+    """
+    Осуществяет подключение клиентов и обмен ключами между ними
+
+    Параметры: 
+
+    sock: сокет клиента
+    addr: IP адрес и порт клиента
+
+    """
+    global online_users_list, online_users_list_lock, message_storage
+
+    # Приём имени при подключении клиента
     username = sock.recv(20).decode(encoding='utf-8').strip()
     print(f'[{username}] joined from {addr}!')
-    #ожидание приема ключа с клиента и вытягивание хэша с сообщения
+
+    # ожидание приема ключа с клиента и вытягивание хэша с сообщения
     data = sock.recv(2080)
     key = data[:2048]
     hash = data[2048:]
-    print(hash)
-    #Создание проверочного хэша и отправка его на клиент для проверки
+
+    # Создание проверочного хэша и отправка его на клиент для проверки
     h1 = criptography.hashing_key(hash).digest()
     sock.send(h1)
-    #Ожидание сигнала-результата проверки 
-    check = sock.recv(5).decode("utf-8")
-    if check == "OK   ":
-        #отправка списка онлайн пользователей с ключами клиенту
-        users_list_lock.acquire()
-        users_list[0].append(username)
-        users_list[1].append(sock)
-        users_list[2].append(key)
-        users_list_lock.release()
-    
 
+    # Ожидание сигнала-результата проверки
+    answer = sock.recv(5).decode("utf-8")
+    if answer == "OK   ":
 
-       # sock.send(json.dumps(users_list[0]).encode(encoding='utf-8'))
+        # добавление пользователя в список онлайн пользователей
+        online_users_list_lock.acquire()
+        online_users_list[0].append(username)
+        online_users_list[1].append(sock)
+        online_users_list[2].append(key)
+        online_users_list_lock.release()
 
-
-    #     h3 = sock.recv(32)
-    #     h4 = criptography.hashing_key(h1)
-    #     if criptography.is_hash_equal(h3,h4):
-    #         sock.send("OK".encode("utf-8"))
-    #     else:
-    #         sock.send("ERROR".encode("utf-8"))
-    #         sock.send(json.dumps({'text': 'conn_close'}).encode(encoding='utf-8'))
-
-    # else:
-    #     sock.send(json.dumps({'text': 'conn_close'}).encode(encoding='utf-8'))
-
-    
-    
+    # Основной цикл
     while True:
-        incoming = sock.recv(1024).decode(encoding="utf-8")
-        data = json.loads(incoming)
-        if data["text"] == 'Online':
-            print(f"[INFO] Sent users list: {users_list[0]}")
-            sock.send(json.dumps(users_list[0]).encode('utf-8'))
-        #Обработка запроса ключа
-        elif "Get_key" in data.keys():
-            #Находим индекс ключа нужного пользователя
-            key_index = users_list.index(data["Get_key"])
-            hash_key = criptography.hashing_key(users_list[2][key_index].encode("utf-8")).digest()
-            sock.send(json.dumps({'key': users_list[2][key_index] + hash_key}).encode("utf-8")) 
-            #Принимаем проверочный хэш с клиента
-            h_client = sock.recv(32)
-            #Создаем проверочный хэш
-            h_check = criptography.hashing_key(hash_key).digest()
-            #Проверка и отправка сигнала
-            if criptography.is_hash_equal(h_client, h_check):
+
+        # Прием сообщения с клиента
+        imcoming_message = sock.recv(1024).decode(encoding="utf-8")
+        data_of_message = json.loads(imcoming_message)
+
+        # Обработка запроса ключа клиента
+        if "Get_key" in data_of_message.keys():
+
+            current_user_index = online_users_list[0].index(
+                data_of_message["Get_key"])
+            print(online_users_list[current_user_index])
+            hash_key = criptography.hashing_key(
+                online_users_list[2][current_user_index]).digest()
+            sock.send(online_users_list[2][current_user_index] + hash_key)
+
+            # Приём проверочного хэша с клиента
+            h3 = sock.recv(32)
+
+            # Создание проверочного хэша
+            h4 = hash_key
+
+            # Проверка и отправка сигнала
+            if criptography.is_hash_equal(h3, h4):
                 sock.send("OK".encode("utf-8"))
             else:
-                sock.send("ERROR")
-        elif data["text"] == 'conn_close':
-            sock.send(json.dumps({'text': 'conn_close'}).encode(encoding='utf-8'))
+                sock.send("ERROR".encode("utf-8"))
+        
+        # Обработка запроса списка онлайн-пользователей
+        elif data_of_message["text"] == 'Online':
+            print(f"[INFO] Sent users list: {online_users_list[0]}")
+            sock.send(json.dumps(online_users_list[0]).encode('utf-8'))
+
+         # Обработка запроса отключения клиента
+        elif data_of_message["text"] == 'conn_close':
+            sock.send(json.dumps({'text': 'conn_close'}
+                                 ).encode(encoding='utf-8'))
             break
+
+        # Добавление сообщения в буфер
         else:
-            #sock.send(b'Echo: ' + data["text"].encode(encoding="utf-8"))
-            print(f"[INFO] Got new message {data}")
+            print(f"[INFO] Got new message {data_of_message}")
             message_storage_lock.acquire()
-            message_storage.append(data)
+            message_storage.append(data_of_message)
             message_storage_lock.release()
 
-    users_list_lock.acquire()
-    user_index = users_list[0].index(username)
-    users_list[0].pop(user_index)
-    users_list[1].pop(user_index)
-    users_list_lock.release()
+    # Удаление отключенного клиента
+    online_users_list_lock.acquire()
+    user_index = online_users_list[0].index(username)
+    online_users_list[0].pop(user_index)
+    online_users_list[1].pop(user_index)
+    online_users_list[2].pop(user_index)
+    online_users_list_lock.release()
     sock.close()
 
-# Рассылает сообщение из буфера в отдельном потоке
+
 def send_messages():
-    global users_list, users_list_lock, message_storage, message_storage_lock, closing_server_flag
+    """
+    Рассылает сообщение из буфера в отдельном потоке
+    """
+
+    global online_users_list, online_users_list_lock, message_storage, message_storage_lock, closing_server_flag
+
+    # Основной цикл отправки сообщений
     while True:
         if closing_server_flag:
             break
         message_storage_lock.acquire()
-        users_list_lock.acquire()
+        online_users_list_lock.acquire()
 
-        #отправка сообщений из буфера message_storage
+        # отправка сообщений из буфера message_storage
         for msg in message_storage:
-                print(f"[INFO] Sending message {msg}")
-                if msg["to"] in users_list[0]:
-                    ind = users_list[0].index(msg["to"])
-                    receiver_sock = users_list[1][ind]
-                    receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
-                    message_storage.remove(msg)
-                    break
+            print(f"[INFO] Sending message {msg}")
+            if msg["to"] in online_users_list[0]:
+                ind = online_users_list[0].index(msg["to"])
+                receiver_sock = online_users_list[1][ind]
+                receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
+                message_storage.remove(msg)
+                break
         message_storage_lock.release()
-        users_list_lock.release()
+        online_users_list_lock.release()
 
-#список онлайн пользователей
-users_list = [[],[], []]
-# блокирование логов 
-users_list_lock = threading.Lock()
+
+# список онлайн пользователей
+online_users_list = [[], [], []]
+
+# блокирование логов
+online_users_list_lock = threading.Lock()
 message_storage_lock = threading.Lock()
+
 # буфер сообщений
 message_storage = []
+
 # адрес и порт сервера
 config = {}
+
 # отключение рассыльщика
 closing_server_flag = False
 
-
+# выгрузка параметров сервера 
 with open('server_config.json') as f:
     config = json.load(f)
-# создание сокета для подключений 
+
+# создание сокета для подключений
 server_socket = socket.socket()
-server_socket.bind((config['address'], config['port'])) # 127.0.0.1:7001
+server_socket.bind((config['address'], config['port']))  # 127.0.0.1:7001
 server_socket.listen(10)
 print(f"[INFO] Listening on {config['address']}:{config['port']}")
 print("[INFO] Press Ctrl+C to close server")
-# создание потока 
+
+# создание потока
 msg_thread = threading.Thread(target=send_messages)
 msg_thread.start()
+
 # основной цикл
 try:
     while True:
+        # принимаем клиентов
         client_socket, client_address = server_socket.accept()
-        tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
+
+        # Вызываем обработчик клиента для каждого клиента
+        tmp_thread = threading.Thread(target=handle_client, args=[
+                                      client_socket, client_address])
         tmp_thread.start()
 except KeyboardInterrupt:
     print('Closing server...')

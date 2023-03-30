@@ -6,101 +6,159 @@ from consolemenu import prompt_utils, ConsoleMenu, SelectionMenu, Screen
 from consolemenu.items import FunctionItem
 import criptography
 
-message_buffer = []
-users_list = []
-user_key = bytes()
-user_hash = bytes()
-check_result = ""
 
-def send_message(sock: socket.socket, my_username):
-    global users_list
-    # запрашиваем список юзеров
-    sock.send(json.dumps({"text": 'Online'}).encode(encoding='utf-8'))
-    # ждем
-    while len(users_list) == 0:
+def send_message(my_sock: socket.socket, my_username):
+    """
+    Производит отправку сообщения с клиента на сервер
+
+    Параметры:
+
+    my_sock: сокет отправителя
+    my_username: адрес отправителя
+    """
+
+    global online_users_list
+
+    # запрос список юзеров
+    my_sock.send(json.dumps({"text": 'Online'}).encode(encoding='utf-8'))
+
+    # ожидание списка пользователей
+    while len(online_users_list) == 0:
         pass
-    # users_list = json.loads(sock.recv(1024).decode("utf-8"))
-    user_index = SelectionMenu.get_selection(users_list, "Send to...")
-    if user_index >= len(users_list):
+
+    # выбор клиента для отправки сообщений
+    receiver_index = SelectionMenu.get_selection(
+        online_users_list, "Send to...")
+    if receiver_index >= len(online_users_list):
         notsend_prompt = prompt_utils.PromptUtils(Screen())
         print("[INFO] No message was sent!")
         notsend_prompt.enter_to_continue()
         return
-    #Запрос ключа получателя
-    sock.send(json.dumps({"Get_key": users_list[user_index]}))
-    # ждем ключа
-    while len(user_key) == 0:
-        pass
-    #Создаем проверочный хэш и отправляем его на сервер
-    h_check = criptography.hashing_key(hash).digest()
-    sock.send(h_check)
-    while len(check_result) == 0:
-        pass
 
-    data = {"from": my_username, "to": users_list[user_index], "text": ""}
-    if check_result == "OK":
-        data = {"from": my_username, "to":"", "text": ""}
+    # Запрос ключа получателя
+    my_sock.send(json.dumps({"Get_key": online_users_list[receiver_index]}).encode("utf-8"))
+
+    # ожидание ключа
+    while len(receiver_key) == 0:
+        pass
+    # Создаем проверочный хэш и отправляем его на сервер
+    h3 = criptography.hashing_key(receiver_hash).digest() #!
+    my_sock.send(h3)
+
+    # Ожидание ответа от сервера
+    while len(answer) == 0:
+        pass
+    # Формирование структуры отправки сообщений
+    data = {"from": my_username,
+            "to": online_users_list[receiver_index], "text": ""}
+
+    if answer == "OK":
+        data = {"from": my_username, "to": "", "text": ""}
         test_prompt = prompt_utils.PromptUtils(Screen())
-        data["to"] = users_list[user_index]
+        data["to"] = online_users_list[receiver_index]
         data["text"] = test_prompt.input("Text").input_string
-        bytes_count = sock.send(json.dumps(data).encode(encoding='utf-8'))
+        bytes_count = my_sock.send(json.dumps(data).encode(encoding='utf-8'))
         print(f'{bytes_count} bytes sent!')
         test_prompt.enter_to_continue()
     else:
         print("Ошибка! Клиент будет отключен")
-        sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
+        my_sock.send(json.dumps({"text": 'conn_close'}
+                                ).encode(encoding='utf-8'))
         listener.join()
-        sock.close()
+        my_sock.close()
+
 
 def see_messages():
+    """
+    Выводит список сообщений на экран
+    """
+
     global message_buffer
+
     test_prompt = prompt_utils.PromptUtils(Screen())
     for i in message_buffer:
         print(f"{i['from']}: {i['text']}\n")
     test_prompt.enter_to_continue()
 
+# Поток прослушки сообщений
 
-def listen_to_server(conn: socket.socket):
-    global message_buffer, users_list, user_key, user_hash, check_result
+
+def listen_to_server(my_sock: socket.socket):
+    """
+    Функция потока прослушки сообщений
+
+    Параметры:
+
+    my_sock: сокет конкретного клиента
+
+    """
+
+    global message_buffer, online_users_list, receiver_key, receiver_hash, answer
+
+    # Основной цикл
     while True:
-        incoming = conn.recv(2080)
-        # data = json.loads(incoming)
+
+        # Прием сообщения
+        incoming = my_sock.recv(2080)
+
+        # Выделение хэша и ключа из сообщения
         if len(incoming) == 2080:
-            user_key = incoming[:2048]
-            user_hash = incoming[2048:]
+            receiver_key = incoming[:2048]
+            receiver_hash = incoming[2048:]
+
+        # Обработка ответа о проверки
         elif incoming.decode(encoding="utf-8") in ["OK", "ERROR"]:
-            check_result = incoming.decode(encoding="utf-8")
+            answer = incoming.decode(encoding="utf-8")
+
+        # Прием списка онлайн-пользователей
         elif isinstance(json.loads(incoming.decode(encoding="utf-8")), list):
             print("[INFO] Got users list!")
-            users_list = json.loads(incoming.decode(encoding="utf-8")).copy()
+            online_users_list = json.loads(
+                incoming.decode(encoding="utf-8")).copy()
+
+        # Прием сообщения об отключении
         elif json.loads(incoming.decode(encoding="utf-8"))['text'] == 'conn_close':
             break
+
+        # Прием обычного сообщения
         elif len(incoming) > 0:
-            message_buffer.append(json.loads(incoming.decode(encoding="utf-8")))
+            message_buffer.append(json.loads(
+                incoming.decode(encoding="utf-8")))
         else:
             break
-#подключение
+
+
+# буфер сообщений конкретного клиента
+message_buffer = []
+
+# список пользователей, которым можно отправить сообщение
+online_users_list = []
+
+# принятые ключ и хэш
+receiver_key = bytes()
+receiver_hash = bytes()
+
+# ответ проверки хэшей
+answer = ""
+
+
+# подключение
 port, username = int(sys.argv[1]), sys.argv[2]
 sock = socket.socket()
 sock.connect(('127.0.0.1', port))
 username_to_send = username.rjust(20, " ")
 sock.send(username_to_send.encode(encoding='utf-8'))
 
-
-
-
-#генерация ключа и отправка его на сервер
+# генерация ключа и отправка его на сервер
 public_key = criptography.key_generate()
 hash = criptography.hashing_key(public_key.encode("utf-8")).digest()
-print(hash)
 sock.send(public_key.encode("utf-8") + hash)
 
-
-
-#прием хэша с сервера для проверки 
+# прием хэша с сервера для проверки
 h1 = sock.recv(32)
-#проверка хэша ключа
-if criptography.is_hash_equal(h1,hash):
+
+# проверка хэша ключа
+if criptography.is_hash_equal(h1, hash):
     sock.send("OK   ".encode("utf-8"))
 else:
     sock.send("ERROR".encode("utf-8"))
@@ -108,9 +166,12 @@ else:
     sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
     sock.close()
     exit(0)
+
+# Создание потока прослушивания сообщений
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
 
+# Создание консольного меню
 menu = ConsoleMenu(f"Secure chat client [{username}]")
 item1 = FunctionItem("Send new message", send_message, [sock, username])
 item2 = FunctionItem("List incoming messages", see_messages)
@@ -118,22 +179,8 @@ menu.append_item(item1)
 menu.append_item(item2)
 menu.show()
 
+# Отключение
 print("Exit routine...")
 sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
 listener.join()
 sock.close()
-
-# while True:
-#     data = {"from" : "", "to" : "", "text" : ""}
-#     data["from"] = username
-#     data["to"] = input("Send to: ")
-#     data["text"] = input('>>> ')
-    
-#     if data["text"] == '/exit':
-#         print('Closing program...')
-#         sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
-#         listener.join()
-#         sock.close()
-#         break
-#     bytes_count = sock.send(json.dumps(data).encode(encoding='utf-8'))
-#     print(f'{bytes_count} bytes sent!')
