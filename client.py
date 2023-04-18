@@ -7,6 +7,21 @@ from consolemenu.items import FunctionItem
 import criptography
 
 
+def socket_send(sock: socket.socket, type: str, content):
+    data = {"type": type, "content": content}
+    raw_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    raw_data_length = len(raw_data)
+    sock.send(raw_data_length.to_bytes(4))
+    sock.send(raw_data)
+
+
+def socket_recv(sock: socket.socket) -> dict:
+    raw_data_length = int.from_bytes(sock.recv(4))
+    raw_data = sock.recv(raw_data_length)
+    data = json.loads(raw_data.decode("utf-8"))
+    return data
+
+
 def send_message(my_sock: socket.socket, my_username):
     """
     Производит отправку сообщения с клиента на сервер
@@ -42,7 +57,7 @@ def send_message(my_sock: socket.socket, my_username):
     while len(receiver_key) == 0:
         pass
     # Создаем проверочный хэш и отправляем его на сервер
-    h3 = criptography.hashing_key(receiver_hash).digest() #!
+    h3 = criptography.hashing_key(receiver_hash).digest()
     my_sock.send(h3)
 
     # Ожидание ответа от сервера
@@ -131,6 +146,7 @@ def listen_to_server(my_sock: socket.socket):
 # буфер сообщений конкретного клиента
 message_buffer = []
 
+
 # список пользователей, которым можно отправить сообщение
 online_users_list = []
 
@@ -150,9 +166,11 @@ username_to_send = username.rjust(20, " ")
 sock.send(username_to_send.encode(encoding='utf-8'))
 
 # генерация ключа и отправка его на сервер
-public_key = criptography.key_generate()
-hash = criptography.hashing_key(public_key.encode("utf-8")).digest()
-sock.send(public_key.encode("utf-8") + hash)
+private_key, public_key = criptography.key_generate()
+public_key_length = len(public_key)
+sock.send(public_key_length.to_bytes(4))
+hash = criptography.hashing_key(public_key).digest()
+sock.send(public_key + hash)
 
 # прием хэша с сервера для проверки
 h1 = sock.recv(32)

@@ -21,9 +21,10 @@ def handle_client(sock: socket.socket, addr: tuple):
     print(f'[{username}] joined from {addr}!')
 
     # ожидание приема ключа с клиента и вытягивание хэша с сообщения
-    data = sock.recv(2080)
-    key = data[:2048]
-    hash = data[2048:]
+    key_length = int.from_bytes(sock.recv(4))
+    data = sock.recv(key_length + 32)
+    key = data[:key_length]
+    hash = data[key_length:]
 
     # Создание проверочного хэша и отправка его на клиент для проверки
     h1 = criptography.hashing_key(hash).digest()
