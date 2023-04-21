@@ -2,7 +2,7 @@
 import socket
 
 
-def socket_send(sock: socket.socket, header: str, content: bytes):
+def socket_send(sock: socket.socket, header: str, content: bytes = 'empty'.encode('utf-8')):
     # send header
     header_data = header.encode('utf-8')
     header_len = len(header_data)
@@ -21,4 +21,4 @@ def socket_recv(sock: socket.socket):
     # recv content
     content_len = int.from_bytes(sock.recv(4), 'little')
     content = sock.recv(content_len)
-    return header, content
+    return header.split(';'), content

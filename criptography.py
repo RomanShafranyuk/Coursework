@@ -50,6 +50,7 @@ def is_hash_equal(incomming_hash, msg_check):
     """
     return hashlib.sha256(msg_check).digest() == incomming_hash
 
-private_key, public_key = key_generate()
-print(len(private_key))
-print(len(public_key))
+if __name__ == "__main__":
+    private_key, public_key = key_generate()
+    print(len(private_key))
+    print(len(public_key))

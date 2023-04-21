@@ -2,6 +2,7 @@ import socket
 import threading
 import json
 import criptography
+from socketmessage import *
 
 
 def handle_client(sock: socket.socket, addr: tuple):
@@ -17,58 +18,72 @@ def handle_client(sock: socket.socket, addr: tuple):
     global online_users_list, online_users_list_lock, message_storage
 
     # Приём имени при подключении клиента
-    username = sock.recv(20).decode(encoding='utf-8').strip()
+    # username = sock.recv(20).decode(encoding='utf-8').strip()
+    _, username_raw = socket_recv(sock)
+    username = username_raw.decode('utf-8')
     print(f'[{username}] joined from {addr}!')
 
     # ожидание приема ключа с клиента и вытягивание хэша с сообщения
-    key_length = int.from_bytes(sock.recv(4))
-    data = sock.recv(key_length + 32)
+    # key_length = int.from_bytes(sock.recv(4))
+    # data = sock.recv(key_length + 32)
+    header, data = socket_recv(sock)
+    key_length = int(header[1])
     key = data[:key_length]
     hash = data[key_length:]
 
     # Создание проверочного хэша и отправка его на клиент для проверки
     h1 = criptography.hashing_key(hash).digest()
-    sock.send(h1)
+    # sock.send(h1)
+    socket_send(sock, "hashhash", h1)
 
     # Ожидание сигнала-результата проверки
-    answer = sock.recv(5).decode("utf-8")
-    if answer == "OK   ":
-
+    # answer = sock.recv(5).decode("utf-8")
+    header, _ = socket_recv(sock)
+    if header[0] == "OK":
         # добавление пользователя в список онлайн пользователей
         online_users_list_lock.acquire()
         online_users_list[0].append(username)
         online_users_list[1].append(sock)
         online_users_list[2].append(key)
         online_users_list_lock.release()
+    elif header[0] == "ERROR":
+        print(f"Ошибка аутентификации пользователя ({username})!")
+        sock.close()
+        socket_send(sock, "SHUTDOWN")
+        return
 
     # Основной цикл
     while True:
 
         # Прием сообщения с клиента
-        imcoming_message = sock.recv(1024).decode(encoding="utf-8")
-        data_of_message = json.loads(imcoming_message)
+        # imcoming_message = sock.recv(1024).decode(encoding="utf-8")
+        # data_of_message = json.loads(imcoming_message)
+        header, data = socket_recv(sock)
 
         # Обработка запроса ключа клиента
-        if "Get_key" in data_of_message.keys():
-
-            current_user_index = online_users_list[0].index(
-                data_of_message["Get_key"])
-            print(online_users_list[current_user_index])
-            hash_key = criptography.hashing_key(
-                online_users_list[2][current_user_index]).digest()
-            sock.send(online_users_list[2][current_user_index] + hash_key)
+        if header[0] == "getkey":
+            user_to_find = data.decode('utf-8')
+            current_user_index = online_users_list[0].index(user_to_find)
+            print(f"getkey:{user_to_find} found {online_users_list[current_user_index]}")
+            hash_key = criptography.hashing_key(online_users_list[2][current_user_index]).digest()
+            # sock.send(online_users_list[2][current_user_index] + hash_key)
+            socket_send(sock, "keyhash", hash_key)
 
             # Приём проверочного хэша с клиента
-            h3 = sock.recv(32)
+            # h3 = sock.recv(32)
+            header, h3 = socket_recv(sock)
 
             # Создание проверочного хэша
             h4 = hash_key
 
             # Проверка и отправка сигнала
             if criptography.is_hash_equal(h3, h4):
-                sock.send("OK".encode("utf-8"))
+                # sock.send("OK".encode("utf-8"))
+                socket_send(sock, "OK")
             else:
-                sock.send("ERROR".encode("utf-8"))
+                # sock.send("ERROR".encode("utf-8"))
+                socket_send(sock, "ERROR")
+                print("getkey:Ошибка аутентификации!")
         
         # Обработка запроса списка онлайн-пользователей
         elif data_of_message["text"] == 'Online':
@@ -126,6 +141,7 @@ def send_messages():
 
 
 # список онлайн пользователей
+# username, socket, public key
 online_users_list = [[], [], []]
 
 # блокирование логов
@@ -141,6 +157,8 @@ config = {}
 # отключение рассыльщика
 closing_server_flag = False
 
+
+# начало программы
 # выгрузка параметров сервера 
 with open('server_config.json') as f:
     config = json.load(f)
@@ -150,9 +168,8 @@ server_socket = socket.socket()
 server_socket.bind((config['address'], config['port']))  # 127.0.0.1:7001
 server_socket.listen(10)
 print(f"[INFO] Listening on {config['address']}:{config['port']}")
-print("[INFO] Press Ctrl+C to close server")
 
-# создание потока
+# создание потока рассыльщика
 msg_thread = threading.Thread(target=send_messages)
 msg_thread.start()
 
@@ -167,10 +184,11 @@ try:
                                       client_socket, client_address])
         tmp_thread.start()
 except KeyboardInterrupt:
-    print('Closing server...')
-except Exception:
-    print('ERROR')
+    print('Got keyboard interrupt, closing server...')
+except Exception as ex:
+    print(f'Caught exception: {ex}')
 finally:
+    print('[finally] Closing server...')
     closing_server_flag = True
     msg_thread.join()
     server_socket.close()

@@ -1,25 +1,11 @@
 import socket
 import threading
-import sys
+import argparse
 import json
 from consolemenu import prompt_utils, ConsoleMenu, SelectionMenu, Screen
 from consolemenu.items import FunctionItem
 import criptography
-
-
-def socket_send(sock: socket.socket, type: str, content):
-    data = {"type": type, "content": content}
-    raw_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    raw_data_length = len(raw_data)
-    sock.send(raw_data_length.to_bytes(4))
-    sock.send(raw_data)
-
-
-def socket_recv(sock: socket.socket) -> dict:
-    raw_data_length = int.from_bytes(sock.recv(4))
-    raw_data = sock.recv(raw_data_length)
-    data = json.loads(raw_data.decode("utf-8"))
-    return data
+from socketmessage import *
 
 
 def send_message(my_sock: socket.socket, my_username):
@@ -95,8 +81,6 @@ def see_messages():
         print(f"{i['from']}: {i['text']}\n")
     test_prompt.enter_to_continue()
 
-# Поток прослушки сообщений
-
 
 def listen_to_server(my_sock: socket.socket):
     """
@@ -146,7 +130,6 @@ def listen_to_server(my_sock: socket.socket):
 # буфер сообщений конкретного клиента
 message_buffer = []
 
-
 # список пользователей, которым можно отправить сообщение
 online_users_list = []
 
@@ -157,31 +140,44 @@ receiver_hash = bytes()
 # ответ проверки хэшей
 answer = ""
 
+# начало программы
+parser = argparse.ArgumentParser(description="Chat client")
+parser.add_argument('username')
+parser.add_argument('-p', dest='port', type=int, default=7001, required=False)
+args = parser.parse_args()
 
 # подключение
-port, username = int(sys.argv[1]), sys.argv[2]
+username, port = args.username, args.port
+print(f"Connecting as '{username}' to '127.0.0.1:{port}'...")
 sock = socket.socket()
 sock.connect(('127.0.0.1', port))
-username_to_send = username.rjust(20, " ")
-sock.send(username_to_send.encode(encoding='utf-8'))
+socket_send(sock, "username", username.encode('utf-8'))
+# username_to_send = username.rjust(20, " ")
+# sock.send(username_to_send.encode(encoding='utf-8'))
 
 # генерация ключа и отправка его на сервер
 private_key, public_key = criptography.key_generate()
-public_key_length = len(public_key)
-sock.send(public_key_length.to_bytes(4))
+pr_len, pu_len = len(private_key), len(public_key)
 hash = criptography.hashing_key(public_key).digest()
-sock.send(public_key + hash)
+hash_len = len(hash)
+socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
+# sock.send(public_key_length.to_bytes(4))
+# sock.send(public_key + hash)
 
 # прием хэша с сервера для проверки
-h1 = sock.recv(32)
+_, h1 = socket_recv(sock)
+# h1 = sock.recv(32)
 
 # проверка хэша ключа
 if criptography.is_hash_equal(h1, hash):
-    sock.send("OK   ".encode("utf-8"))
+    # sock.send("OK   ".encode("utf-8"))
+    socket_send(sock, "OK")
 else:
-    sock.send("ERROR".encode("utf-8"))
-    print("Возникла ошибка аутентификации! Пользователь отключен...")
-    sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
+    # sock.send("ERROR".encode("utf-8"))
+    socket_send(sock, "ERROR")
+    print("Возникла ошибка аутентификации! Отключение от сервера...")
+    socket_send(sock, "SHUTDOWN")
+    # sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
     sock.close()
     exit(0)
 
@@ -199,6 +195,7 @@ menu.show()
 
 # Отключение
 print("Exit routine...")
-sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
+# sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
+socket_send(sock, "SHUTDOWN")
 listener.join()
 sock.close()
