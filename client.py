@@ -20,14 +20,14 @@ def send_message(my_sock: socket.socket, my_username):
 
     global online_users_list
 
-    # запрос список юзеров
+    # запрос списка онлайн пользователей
     socket_send(my_sock, "online")
 
     # ожидание списка пользователей
     while len(online_users_list) == 0:
         pass
 
-    # выбор клиента для отправки сообщений
+    # выбор клиента для отправки сообщений, или отмена отправки
     receiver_index = SelectionMenu.get_selection(online_users_list, "Send to...")
     if receiver_index >= len(online_users_list):
         notsend_prompt = prompt_utils.PromptUtils(Screen())
@@ -38,9 +38,10 @@ def send_message(my_sock: socket.socket, my_username):
     # Запрос ключа получателя
     socket_send(my_sock, "getkey", online_users_list[receiver_index].encode('utf-8'))
 
-    # ожидание ключа
+    # ожидание ключа получателя
     while len(receiver_key) == 0:
         pass
+
     # Создаем проверочный хэш и отправляем его на сервер
     h3 = criptography.hashing_key(receiver_hash).digest()
     socket_send(my_sock, "h3", h3)
@@ -48,13 +49,13 @@ def send_message(my_sock: socket.socket, my_username):
     # Ожидание ответа от сервера
     while len(answer) == 0:
         pass
-    # Формирование структуры отправки сообщений
+
+    # Формирование структуры сообщения
     data = {"from": my_username, "to": online_users_list[receiver_index], "text": ""}
 
     if answer == "OK":
         test_prompt = prompt_utils.PromptUtils(Screen())
         data["text"] = test_prompt.input("Text").input_string
-        # bytes_count = my_sock.send(json.dumps(data).encode(encoding='utf-8'))
         socket_send(my_sock, "message", json.dumps(data).encode('utf-8'))
         test_prompt.enter_to_continue()
     else:
@@ -93,7 +94,6 @@ def listen_to_server(my_sock: socket.socket):
     while True:
 
         # Прием сообщения
-        # incoming = my_sock.recv(2080)
         headers, data = socket_recv(my_sock)
 
         # Выделение хэша и ключа из сообщения
@@ -158,7 +158,6 @@ socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
 
 # прием хэша с сервера для проверки
 _, h1 = socket_recv(sock)
-# h1 = sock.recv(32)
 
 # проверка хэша ключа
 if criptography.is_hash_equal(h1, hash):

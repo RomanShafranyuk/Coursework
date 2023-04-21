@@ -3,6 +3,9 @@ import socket
 
 
 def socket_send(sock: socket.socket, header: str, content: bytes = 'empty'.encode('utf-8')):
+    """
+    Принимает строку заголовков, разделенных символом `;`, и контент в виде `bytes`
+    """
     # send header
     header_data = header.encode('utf-8')
     header_len = len(header_data)
