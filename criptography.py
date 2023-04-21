@@ -2,7 +2,7 @@ import hashlib
 import string
 import random
 import rsa
-def key_generate(N=1024) -> tuple[bytes, bytes]: 
+def key_generate(N=1024) -> 'tuple[bytes, bytes]':
     """
     Генерирует ключ шифрования для обмена сообщениями.
     Возвращает (приватный ключ, публичный ключ).

@@ -3,6 +3,7 @@ import threading
 import json
 import criptography
 from socketmessage import *
+import logging
 
 
 def handle_client(sock: socket.socket, addr: tuple):
@@ -18,14 +19,11 @@ def handle_client(sock: socket.socket, addr: tuple):
     global online_users_list, online_users_list_lock, message_storage
 
     # Приём имени при подключении клиента
-    # username = sock.recv(20).decode(encoding='utf-8').strip()
     _, username_raw = socket_recv(sock)
     username = username_raw.decode('utf-8')
-    print(f'[{username}] joined from {addr}!')
+    logging.info(f"({username}) joined from ({addr})!")
 
     # ожидание приема ключа с клиента и вытягивание хэша с сообщения
-    # key_length = int.from_bytes(sock.recv(4))
-    # data = sock.recv(key_length + 32)
     header, data = socket_recv(sock)
     key_length = int(header[1])
     key = data[:key_length]
@@ -33,11 +31,9 @@ def handle_client(sock: socket.socket, addr: tuple):
 
     # Создание проверочного хэша и отправка его на клиент для проверки
     h1 = criptography.hashing_key(hash).digest()
-    # sock.send(h1)
     socket_send(sock, "hashhash", h1)
 
     # Ожидание сигнала-результата проверки
-    # answer = sock.recv(5).decode("utf-8")
     header, _ = socket_recv(sock)
     if header[0] == "OK":
         # добавление пользователя в список онлайн пользователей
@@ -47,60 +43,57 @@ def handle_client(sock: socket.socket, addr: tuple):
         online_users_list[2].append(key)
         online_users_list_lock.release()
     elif header[0] == "ERROR":
-        print(f"Ошибка аутентификации пользователя ({username})!")
-        sock.close()
+        logging.error(f'Ошибка аутентификации пользователя ({username})!')
         socket_send(sock, "SHUTDOWN")
+        sock.close()
         return
 
     # Основной цикл
     while True:
 
         # Прием сообщения с клиента
-        # imcoming_message = sock.recv(1024).decode(encoding="utf-8")
-        # data_of_message = json.loads(imcoming_message)
         header, data = socket_recv(sock)
 
         # Обработка запроса ключа клиента
         if header[0] == "getkey":
             user_to_find = data.decode('utf-8')
             current_user_index = online_users_list[0].index(user_to_find)
-            print(f"getkey:{user_to_find} found {online_users_list[current_user_index]}")
             hash_key = criptography.hashing_key(online_users_list[2][current_user_index]).digest()
+            user_key = online_users_list[2][current_user_index]
             # sock.send(online_users_list[2][current_user_index] + hash_key)
-            socket_send(sock, "keyhash", hash_key)
+            socket_send(sock, f"keyhash;{len(user_key)}", user_key + hash_key)
 
             # Приём проверочного хэша с клиента
-            # h3 = sock.recv(32)
-            header, h3 = socket_recv(sock)
+            _, h3 = socket_recv(sock)
 
             # Создание проверочного хэша
             h4 = hash_key
 
             # Проверка и отправка сигнала
             if criptography.is_hash_equal(h3, h4):
-                # sock.send("OK".encode("utf-8"))
                 socket_send(sock, "OK")
             else:
-                # sock.send("ERROR".encode("utf-8"))
                 socket_send(sock, "ERROR")
-                print("getkey:Ошибка аутентификации!")
+                logging.error(f'Ошибка аутентификации пользователя ({username})!')
+
         
         # Обработка запроса списка онлайн-пользователей
-        elif data_of_message["text"] == 'Online':
-            print(f"[INFO] Sent users list: {online_users_list[0]}")
-            sock.send(json.dumps(online_users_list[0]).encode('utf-8'))
+        elif header[0] == "online":
+            logging.info(f"Sent users list: {online_users_list[0]}")
+            socket_send(sock, "onlineusers", json.dumps(online_users_list[0]).encode('utf-8'))
 
          # Обработка запроса отключения клиента
-        elif data_of_message["text"] == 'conn_close':
-            sock.send(json.dumps({'text': 'conn_close'}
-                                 ).encode(encoding='utf-8'))
+        elif header[0] == "SHUTDOWN":
+            logging.info(f"Disconnecting ({username})...")
+            socket_send(sock, "SHUTDOWN")
             break
 
         # Добавление сообщения в буфер
         else:
-            print(f"[INFO] Got new message {data_of_message}")
+            logging.info(f"New message from ({username})!")
+            data_json = json.loads(data.decode('utf-8'))
             message_storage_lock.acquire()
-            message_storage.append(data_of_message)
+            message_storage.append(data_json)
             message_storage_lock.release()
 
     # Удаление отключенного клиента
@@ -129,11 +122,12 @@ def send_messages():
 
         # отправка сообщений из буфера message_storage
         for msg in message_storage:
-            print(f"[INFO] Sending message {msg}")
+            logging.info(f"Sending message ({msg})!")
             if msg["to"] in online_users_list[0]:
                 ind = online_users_list[0].index(msg["to"])
                 receiver_sock = online_users_list[1][ind]
-                receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
+                # receiver_sock.send(json.dumps(msg).encode(encoding="utf-8"))
+                socket_send(receiver_sock, "message", json.dumps(msg).encode("utf-8"))
                 message_storage.remove(msg)
                 break
         message_storage_lock.release()
@@ -173,6 +167,7 @@ print(f"[INFO] Listening on {config['address']}:{config['port']}")
 msg_thread = threading.Thread(target=send_messages)
 msg_thread.start()
 
+logging.basicConfig(format='[%(levelname)s] %(funcName)s:%(message)s', level=logging.INFO)
 # основной цикл
 try:
     while True:
@@ -180,15 +175,14 @@ try:
         client_socket, client_address = server_socket.accept()
 
         # Вызываем обработчик клиента для каждого клиента
-        tmp_thread = threading.Thread(target=handle_client, args=[
-                                      client_socket, client_address])
+        tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
         tmp_thread.start()
 except KeyboardInterrupt:
-    print('Got keyboard interrupt, closing server...')
+    logging.info('KeyboardInterrupt, closing server...')
 except Exception as ex:
-    print(f'Caught exception: {ex}')
+    logging.exception(f"Caugth exception: {ex}")
 finally:
-    print('[finally] Closing server...')
+    logging.info("Finally closing server...")
     closing_server_flag = True
     msg_thread.join()
     server_socket.close()

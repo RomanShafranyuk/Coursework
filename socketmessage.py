@@ -15,6 +15,9 @@ def socket_send(sock: socket.socket, header: str, content: bytes = 'empty'.encod
 
 
 def socket_recv(sock: socket.socket):
+    """
+    Возвращает список заголовков, и контент в виде `bytes`
+    """
     # recv header
     header_len = int.from_bytes(sock.recv(4), 'little')
     header = sock.recv(header_len).decode('utf-8')
