@@ -184,3 +184,4 @@ print("Exit routine...")
 sock.send(json.dumps({"text": 'conn_close'}).encode(encoding='utf-8'))
 listener.join()
 sock.close()
+# закрыть порт надо именно, не просто закрыть сокет
