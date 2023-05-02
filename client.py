@@ -18,7 +18,7 @@ def send_message(my_sock: socket.socket, my_username):
     my_username: адрес отправителя
     """
 
-    global online_users_list
+    global online_users_list, receiver_key
 
     # запрос списка онлайн пользователей
     socket_send(my_sock, "online")
@@ -50,13 +50,13 @@ def send_message(my_sock: socket.socket, my_username):
     while len(answer) == 0:
         pass
 
-    # Формирование структуры сообщения
-    data = {"from": my_username, "to": online_users_list[receiver_index], "text": ""}
 
     if answer == "OK":
         test_prompt = prompt_utils.PromptUtils(Screen())
-        data["text"] = test_prompt.input("Text").input_string
-        socket_send(my_sock, "message", json.dumps(data).encode('utf-8'))
+        # шифрование RSA
+        enc_message = criptography.encrypt_message(test_prompt.input("Text").input_string.encode("utf-8"), receiver_key)
+        socket_send(my_sock, f"message;{my_username};{online_users_list[receiver_index]}", enc_message)
+        print(enc_message)
         test_prompt.enter_to_continue()
     else:
         print("Ошибка! Отключение клиента...")
@@ -73,6 +73,7 @@ def see_messages():
     global message_buffer
 
     test_prompt = prompt_utils.PromptUtils(Screen())
+    print(message_buffer)
     for i in message_buffer:
         print(f"{i['from']}: {i['text']}\n")
     test_prompt.enter_to_continue()
@@ -88,13 +89,14 @@ def listen_to_server(my_sock: socket.socket):
 
     """
 
-    global message_buffer, online_users_list, receiver_key, receiver_hash, answer
+    global message_buffer, online_users_list, receiver_key, receiver_hash, answer, private_key
 
     # Основной цикл
     while True:
 
         # Прием сообщения
         headers, data = socket_recv(my_sock)
+        
 
         # Выделение хэша и ключа из сообщения
         if headers[0] == "keyhash":
@@ -117,7 +119,20 @@ def listen_to_server(my_sock: socket.socket):
 
         # Прием обычного сообщения
         elif headers[0] == "message":
-            message_buffer.append(json.loads(data.decode("utf-8")))
+            with open("test.bin", "wb") as f:
+                f.write(data)
+            if headers[1] != "server":
+                confirm, data = criptography.decrypt_message(data, private_key)
+                
+                if not confirm:
+                    socket_send(sock, "ping")
+                    answer, _ = socket_recv(sock)
+                    if answer[0] != "pong":
+                        socket_send(sock, "SHUTDOWN")
+                    
+            message_buffer.append({"from":headers[1], "to": headers[2], "text": data.decode("utf-8")})
+
+        
         
         else:
             break

@@ -5,7 +5,7 @@ def generate_key():
     return rsa.newkeys(2048)
 
 
-def safe_keys_to_file(public_key, private_key):
+def safe_keys_to_file(public_key: bytes, private_key):
     with open("public.pem", "wb") as f:
         f.write(public_key.save_pkcs1("PEM"))
     

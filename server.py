@@ -89,12 +89,22 @@ def handle_client(sock: socket.socket, addr: tuple):
             break
 
         # Добавление сообщения в буфер
-        else:
+        elif header[0] == 'message':
+            rec_name = header[2]
             logging.info(f"New message from ({username})!")
-            data_json = json.loads(data.decode('utf-8'))
-            message_storage_lock.acquire()
-            message_storage.append(data_json)
-            message_storage_lock.release()
+            if rec_name in online_users_list[0]:
+                socket_send(online_users_list[1][online_users_list[0].index(rec_name)], ";".join(header), data)
+            else:
+                socket_send(sock,f"message;server;{username}", "Сообщение не доставлено!".encode("utf-8") )
+                logging.error(f"Сообщение от {username} не доставлено!")
+        
+        elif header[0] == "ping":
+            socket_send(sock, "pong")
+            
+            # data_json = json.loads(data.decode('utf-8'))
+            # message_storage_lock.acquire()
+            # message_storage.append(data_json)
+            # message_storage_lock.release()
 
     # Удаление отключенного клиента
     online_users_list_lock.acquire()
