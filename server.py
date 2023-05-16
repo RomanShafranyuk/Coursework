@@ -106,6 +106,11 @@ def handle_client(sock: socket.socket, addr: tuple):
             # message_storage.append(data_json)
             # message_storage_lock.release()
 
+        ### elif расписание на клиента - ждём несколько секунд и начинаем его пинговать
+        ### если пинг проходит, надо послать какой-то сигнал или изменить флаг,
+        ### чтобы все процессы-обработчики клиентов видели, что надо соединения обрубать.
+        ### Либо сервер стопать просто
+
     # Удаление отключенного клиента
     online_users_list_lock.acquire()
     user_index = online_users_list[0].index(username)

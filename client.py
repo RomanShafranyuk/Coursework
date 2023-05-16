@@ -6,6 +6,89 @@ from consolemenu import prompt_utils, ConsoleMenu, SelectionMenu, Screen
 from consolemenu.items import FunctionItem
 import criptography
 from socketmessage import *
+from datetime import datetime
+
+# import win32com.client
+import subprocess
+
+
+# def close_port_v1(port):
+#     # Create an instance of the Windows Firewall
+#     firewall = win32com.client.Dispatch("HNetCfg.FwMgr")
+#
+#     # Get the current profile
+#     profile = firewall.LocalPolicy.CurrentProfile
+#
+#     # Create a new ICMP (ping) blocking rule
+#     rule = firewall.LocalPolicy.CurrentProfile.FirewallRules.Add()
+#     rule.Name = "Block Port " + str(port)
+#     rule.Protocol = 1  # ICMP (ping)
+#     rule.LocalPorts = str(port)
+#     rule.Action = 0  # Block
+#
+#     # Apply the rule
+#     profile.FirewallRules.Add(rule)
+
+
+def closePhysicalPort():
+    command = f"netsh interface set interface \"Беспроводная сеть\" disable"
+    subprocess.call(command, shell=True)
+
+
+def openPhysicalPort():
+    command = f"netsh interface set interface \"Беспроводная сеть\" enable"
+    subprocess.call(command, shell=True)
+
+
+def check_timetable(sock: socket.socket):
+    with open("logChecker.txt", "w") as logFile:
+        logFile.write("Поток начал работу")
+
+    with open("timeTable.json", "r") as read_file:
+        timeTableData = json.load(read_file)
+    pause_length = timeTableData["pause length"]
+    pause_minutes = pause_length / 60
+    pause_seconds = pause_length % 60
+
+    print("pause_minutes: " + str(pause_minutes))
+    print("pause_seconds: " + str(pause_seconds))
+
+    with open("logChecker.txt", "wr") as logFile:
+        logFile.write("\npause_minutes: " + str(pause_minutes))
+        logFile.write("\npause_seconds: " + str(pause_seconds))
+
+    while True:
+        current_time = datetime.now()
+        if current_time.minute == timeTableData.get(current_time.hour):
+
+            with open("logChecker.txt", "wr") as logFile:
+                logFile.write("\ncurrent minute: " + current_time.minute)
+                logFile.write("\ncurrent second: " + current_time.second)
+
+            port = sock.getsockname()[1]
+            sock.close()
+            closePhysicalPort()  # закрываем порт, чтобы он не пинговался
+            print(f"Port is closed.")
+
+            # отсчёт паузы начинается с первой секунды нужной минуты
+            end_minute = (current_time.minute + pause_minutes) / 60
+            end_second = current_time.second + pause_seconds
+
+            with open("logChecker.txt", "wr") as logFile:
+                logFile.write("\nend minute: " + str(end_minute))
+                logFile.write("\nend second: " + str(end_second))
+
+            while datetime.now().minute != end_minute:
+                pass
+            while datetime.now().second != end_second:
+                pass
+
+            openPhysicalPort()
+
+            with open("logChecker.txt", "wr") as logFile:
+                logFile.write("\nPort has been opened")
+
+
 
 
 def send_message(my_sock: socket.socket, my_username):
@@ -117,6 +200,8 @@ def listen_to_server(my_sock: socket.socket):
         elif headers[0] == "SHUTDOWN":
             break
 
+        ### elif расписание - закрываем порт и ждём пока время не пройдёт
+
         # Прием обычного сообщения
         elif headers[0] == "message":
             with open("test.bin", "wb") as f:
@@ -136,6 +221,35 @@ def listen_to_server(my_sock: socket.socket):
         
         else:
             break
+
+
+def connectToServer(sock: socket.socket):
+    sock.connect(('127.0.0.1', port))
+    socket_send(sock, "username", username.encode('utf-8'))
+
+    # генерация ключа и отправка его на сервер
+    private_key, public_key = criptography.key_generate()
+    pr_len, pu_len = len(private_key), len(public_key)
+    hash = criptography.hashing_key(public_key).digest()
+    hash_len = len(hash)
+    socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
+
+    # прием хэша с сервера для проверки
+    _, h1 = socket_recv(sock)
+
+    # проверка хэша ключа
+    if criptography.is_hash_equal(h1, hash):
+        socket_send(sock, "OK")
+    else:
+        socket_send(sock, "ERROR")
+        print("Возникла ошибка аутентификации! Отключение от сервера...")
+        socket_send(sock, "SHUTDOWN")
+        sock.close()
+        exit(0)
+
+    # Создание потока прослушивания сообщений
+    listener = threading.Thread(target=listen_to_server, args=[sock])
+    listener.start()
 
 
 # буфер сообщений конкретного клиента
@@ -161,6 +275,7 @@ args = parser.parse_args()
 username, port = args.username, args.port
 print(f"Connecting as '{username}' to '127.0.0.1:{port}'...")
 sock = socket.socket()
+
 sock.connect(('127.0.0.1', port))
 socket_send(sock, "username", username.encode('utf-8'))
 
@@ -187,6 +302,12 @@ else:
 # Создание потока прослушивания сообщений
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
+
+checker = threading.Thread(target=check_timetable, args=[sock])
+checker.start()
+
+# sock = socket.socket()
+# connector = threading.Thread(target=connectToServer, args=[sock])
 
 # Создание консольного меню
 menu = ConsoleMenu(f"Secure chat client [{username}]")
