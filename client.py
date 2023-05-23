@@ -35,6 +35,7 @@ import subprocess
 # listener = 0
 time_to_disconnect = False
 # port_has_been_closed_already = False
+time_to_end_work = False
 
 
 def closePhysicalPort():
@@ -47,7 +48,10 @@ def openPhysicalPort():
     subprocess.call(command, shell=True)
 
 
-def check_timetable(sock: socket.socket, serverport, username):
+# def check_timetable(sock: socket.socket, serverport, username):
+def check_timetable(serverport, username):
+    global time_to_disconnect, sock, listener
+
     with open("logChecker.txt", "w+") as logFile:
         logFile.write("Поток начал работу")
 
@@ -72,6 +76,9 @@ def check_timetable(sock: socket.socket, serverport, username):
         logFile.write("\npause_seconds: " + str(pause_seconds))
 
     while True:
+        if time_to_end_work == True:
+            break
+
         current_time = datetime.now()
         # with open("logChecker.txt", "a+") as logFile:
         #     logFile.write("\ncurrent_time: " + str(current_time))
@@ -90,9 +97,10 @@ def check_timetable(sock: socket.socket, serverport, username):
             port = sock.getsockname()[1]
 
             time_to_disconnect = True
+
             socket_send(sock, "ping")
 
-            global listener
+            # global listener
             print(listener)
             listener.join()
             sock.close()
@@ -122,8 +130,9 @@ def check_timetable(sock: socket.socket, serverport, username):
                 pass
 
             openPhysicalPort()
+            time.sleep(5)
 
-            sock = connectToServer(serverport, port)
+            connectToServer(serverport)
             listener = threading.Thread(target=listen_to_server, args=[sock])
             listener.start()
 
@@ -137,7 +146,8 @@ def check_timetable(sock: socket.socket, serverport, username):
 
 
 
-def send_message(my_sock: socket.socket, my_username):
+# def send_message(my_sock: socket.socket, my_username):
+def send_message(my_username):
     """
     Производит отправку сообщения с клиента на сервер
 
@@ -147,11 +157,11 @@ def send_message(my_sock: socket.socket, my_username):
     my_username: адрес отправителя
     """
 
-    global online_users_list, receiver_key
+    global online_users_list, receiver_key, sock
 
     print("запрос списка онлайн пользователей")
     # запрос списка онлайн пользователей
-    socket_send(my_sock, "online")
+    socket_send(sock, "online")
 
     # ожидание списка пользователей
     while len(online_users_list) == 0:
@@ -166,7 +176,7 @@ def send_message(my_sock: socket.socket, my_username):
         return
 
     # Запрос ключа получателя
-    socket_send(my_sock, "getkey", online_users_list[receiver_index].encode('utf-8'))
+    socket_send(sock, "getkey", online_users_list[receiver_index].encode('utf-8'))
 
     # ожидание ключа получателя
     while len(receiver_key) == 0:
@@ -174,7 +184,7 @@ def send_message(my_sock: socket.socket, my_username):
 
     # Создаем проверочный хэш и отправляем его на сервер
     h3 = criptography.hashing_key(receiver_hash).digest()
-    socket_send(my_sock, "h3", h3)
+    socket_send(sock, "h3", h3)
 
     # Ожидание ответа от сервера
     while len(answer) == 0:
@@ -185,14 +195,14 @@ def send_message(my_sock: socket.socket, my_username):
         test_prompt = prompt_utils.PromptUtils(Screen())
         # шифрование RSA
         enc_message = criptography.encrypt_message(test_prompt.input("Text").input_string.encode("utf-8"), receiver_key)
-        socket_send(my_sock, f"message;{my_username};{online_users_list[receiver_index]}", enc_message)
+        socket_send(sock, f"message;{my_username};{online_users_list[receiver_index]}", enc_message)
         print(enc_message)
         test_prompt.enter_to_continue()
     else:
         print("Ошибка! Отключение клиента...")
-        socket_send(my_sock, "SHUTDOWN")
+        socket_send(sock, "SHUTDOWN")
         listener.join()
-        my_sock.close()
+        sock.close()
 
 
 def see_messages():
@@ -221,13 +231,15 @@ def listen_to_server(my_sock: socket.socket):
 
     global message_buffer, online_users_list, receiver_key, receiver_hash, answer, private_key
 
+    global time_to_disconnect
+
     # Основной цикл
     while True:
 
         # Прием сообщения
         headers, data = socket_recv(my_sock)
 
-        if time_to_disconnect == True:
+        if time_to_disconnect:
             break
         
 
@@ -274,18 +286,25 @@ def listen_to_server(my_sock: socket.socket):
 
 
 # def connectToServer(serverport, port = -1):
-def connectToServer(serverport, port=-1):
+def connectToServer(serverport):
+    global time_to_disconnect, sock
     time_to_disconnect = False
 
     sock = socket.socket()
+
+    print("socket created")
 
     # if port > 0:
     #     # sock.bind('127.0.0.1', port)
     #     sock.bind(port)
 
-    print(f"Connecting as '{username}' to '127.0.0.1:{serverport}'...")
-    sock.connect(('127.0.0.1', serverport))
+    address = '192.168.43.67'
+    # address = '127.0.0.1'
+    print(f"Connecting as '{username}' to '{address}:{serverport}'...")
+    sock.connect((address, serverport))
     socket_send(sock, "username", username.encode('utf-8'))
+
+    print('socket_send произошёл')
 
     # генерация ключа и отправка его на сервер
     private_key, public_key = criptography.key_generate()
@@ -294,12 +313,17 @@ def connectToServer(serverport, port=-1):
     hash_len = len(hash)
     socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
 
+    print('socket_send публичного ключа')
+
     # прием хэша с сервера для проверки
     _, h1 = socket_recv(sock)
+
+    print('прием хэша с сервера для проверки')
 
     # проверка хэша ключа
     if criptography.is_hash_equal(h1, hash):
         socket_send(sock, "OK")
+        print('хэш норм')
     else:
         socket_send(sock, "ERROR")
         print("Возникла ошибка аутентификации! Отключение от сервера...")
@@ -311,7 +335,7 @@ def connectToServer(serverport, port=-1):
     # listener = threading.Thread(target=listen_to_server, args=[sock])
     # listener.start()
 
-    return sock
+    # return sock
 
 
 
@@ -337,7 +361,9 @@ args = parser.parse_args()
 # подключение
 username, serverport = args.username, args.port
 
-sock = connectToServer(serverport)
+sock = 0
+# sock = connectToServer(serverport)
+connectToServer(serverport)
 
 # print(f"Connecting as '{username}' to '127.0.0.1:{port}'...")
 # sock = socket.socket()
@@ -369,7 +395,7 @@ sock = connectToServer(serverport)
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
 
-checker = threading.Thread(target=check_timetable, args=[sock, serverport, username])
+checker = threading.Thread(target=check_timetable, args=[serverport, username])
 checker.start()
 
 # sock = socket.socket()
@@ -377,7 +403,7 @@ checker.start()
 
 # Создание консольного меню
 menu = ConsoleMenu(f"Secure chat client [{username}]")
-item1 = FunctionItem("Send new message", send_message, [sock, username])
+item1 = FunctionItem("Send new message", send_message, [username])
 item2 = FunctionItem("List incoming messages", see_messages)
 menu.append_item(item1)
 menu.append_item(item2)
@@ -385,8 +411,8 @@ menu.show()
 
 # Отключение
 print("Exit routine...")
+time_to_end_work = True
 socket_send(sock, "SHUTDOWN")
 listener.join()
 checker.join()
 sock.close()
-# закрыть порт надо именно, не просто закрыть сокет
