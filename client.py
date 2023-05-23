@@ -8,6 +8,9 @@ import criptography
 from socketmessage import *
 from datetime import datetime
 
+import time
+
+
 # import win32com.client
 import subprocess
 
@@ -29,6 +32,10 @@ import subprocess
 #     # Apply the rule
 #     profile.FirewallRules.Add(rule)
 
+# listener = 0
+time_to_disconnect = False
+# port_has_been_closed_already = False
+
 
 def closePhysicalPort():
     command = f"netsh interface set interface \"Беспроводная сеть\" disable"
@@ -40,41 +47,72 @@ def openPhysicalPort():
     subprocess.call(command, shell=True)
 
 
-def check_timetable(sock: socket.socket):
-    with open("logChecker.txt", "w") as logFile:
+def check_timetable(sock: socket.socket, serverport, username):
+    with open("logChecker.txt", "w+") as logFile:
         logFile.write("Поток начал работу")
 
     with open("timeTable.json", "r") as read_file:
         timeTableData = json.load(read_file)
+
+    with open("logChecker.txt", "a+") as logFile:
+        logFile.write("Json-файл открыт")
+        logFile.write("\ntimeTableData: " + str(timeTableData))
+
     pause_length = timeTableData["pause length"]
-    pause_minutes = pause_length / 60
+    pause_minutes = pause_length // 60
     pause_seconds = pause_length % 60
 
     print("pause_minutes: " + str(pause_minutes))
     print("pause_seconds: " + str(pause_seconds))
 
-    with open("logChecker.txt", "wr") as logFile:
+    seconds_to_wait = 60 - pause_seconds
+
+    with open("logChecker.txt", "a+") as logFile:
         logFile.write("\npause_minutes: " + str(pause_minutes))
         logFile.write("\npause_seconds: " + str(pause_seconds))
 
     while True:
         current_time = datetime.now()
-        if current_time.minute == timeTableData.get(current_time.hour):
+        # with open("logChecker.txt", "a+") as logFile:
+        #     logFile.write("\ncurrent_time: " + str(current_time))
 
-            with open("logChecker.txt", "wr") as logFile:
-                logFile.write("\ncurrent minute: " + current_time.minute)
-                logFile.write("\ncurrent second: " + current_time.second)
+        # with open("logChecker.txt", "a+") as logFile:
+        #     logFile.write("\ncurrent minute: " + str(current_time.minute))
+        #     logFile.write("\ntimeTableData.get(current_time.hour): " + str(timeTableData.get(str(current_time.hour))))
+
+        if current_time.minute == timeTableData.get(str(current_time.hour)):
+
+            print("time to close")
+            # with open("logChecker.txt", "a+") as logFile:
+            #     logFile.write("\ncurrent minute: " + str(current_time.minute))
+            #     logFile.write("\ncurrent second: " + str(current_time.second))
 
             port = sock.getsockname()[1]
+
+            time_to_disconnect = True
+            socket_send(sock, "ping")
+
+            global listener
+            print(listener)
+            listener.join()
             sock.close()
+
+            with open("logChecker.txt", "a+") as logFile:
+                logFile.write("\nsocket on port " + str(port) + " is closed")
+
             closePhysicalPort()  # закрываем порт, чтобы он не пинговался
             print(f"Port is closed.")
 
+            # port_has_been_closed_already = True
+
+            with open("logChecker.txt", "a+") as logFile:
+                logFile.write("\ncurrent_time.minute " + str(current_time.minute))
+
             # отсчёт паузы начинается с первой секунды нужной минуты
-            end_minute = (current_time.minute + pause_minutes) / 60
+            end_minute = (current_time.minute + pause_minutes) % 60
             end_second = current_time.second + pause_seconds
 
-            with open("logChecker.txt", "wr") as logFile:
+            with open("logChecker.txt", "a+") as logFile:
                 logFile.write("\nend minute: " + str(end_minute))
                 logFile.write("\nend second: " + str(end_second))
 
@@ -85,8 +123,16 @@ def check_timetable(sock: socket.socket):
 
             openPhysicalPort()
 
-            with open("logChecker.txt", "wr") as logFile:
+            sock = connectToServer(serverport, port)
+            listener = threading.Thread(target=listen_to_server, args=[sock])
+            listener.start()
+
+            with open("logChecker.txt", "a+") as logFile:
                 logFile.write("\nPort has been opened")
+
+            time.sleep(seconds_to_wait)
+
+
 
 
 
@@ -103,6 +149,7 @@ def send_message(my_sock: socket.socket, my_username):
 
     global online_users_list, receiver_key
 
+    print("запрос списка онлайн пользователей")
     # запрос списка онлайн пользователей
     socket_send(my_sock, "online")
 
@@ -179,6 +226,9 @@ def listen_to_server(my_sock: socket.socket):
 
         # Прием сообщения
         headers, data = socket_recv(my_sock)
+
+        if time_to_disconnect == True:
+            break
         
 
         # Выделение хэша и ключа из сообщения
@@ -223,8 +273,18 @@ def listen_to_server(my_sock: socket.socket):
             break
 
 
-def connectToServer(sock: socket.socket):
-    sock.connect(('127.0.0.1', port))
+# def connectToServer(serverport, port = -1):
+def connectToServer(serverport, port=-1):
+    time_to_disconnect = False
+
+    sock = socket.socket()
+
+    # if port > 0:
+    #     # sock.bind('127.0.0.1', port)
+    #     sock.bind(port)
+
+    print(f"Connecting as '{username}' to '127.0.0.1:{serverport}'...")
+    sock.connect(('127.0.0.1', serverport))
     socket_send(sock, "username", username.encode('utf-8'))
 
     # генерация ключа и отправка его на сервер
@@ -248,8 +308,11 @@ def connectToServer(sock: socket.socket):
         exit(0)
 
     # Создание потока прослушивания сообщений
-    listener = threading.Thread(target=listen_to_server, args=[sock])
-    listener.start()
+    # listener = threading.Thread(target=listen_to_server, args=[sock])
+    # listener.start()
+
+    return sock
+
 
 
 # буфер сообщений конкретного клиента
@@ -272,38 +335,41 @@ parser.add_argument('-p', dest='port', type=int, default=7001, required=False)
 args = parser.parse_args()
 
 # подключение
-username, port = args.username, args.port
-print(f"Connecting as '{username}' to '127.0.0.1:{port}'...")
-sock = socket.socket()
+username, serverport = args.username, args.port
 
-sock.connect(('127.0.0.1', port))
-socket_send(sock, "username", username.encode('utf-8'))
+sock = connectToServer(serverport)
 
-# генерация ключа и отправка его на сервер
-private_key, public_key = criptography.key_generate()
-pr_len, pu_len = len(private_key), len(public_key)
-hash = criptography.hashing_key(public_key).digest()
-hash_len = len(hash)
-socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
-
-# прием хэша с сервера для проверки
-_, h1 = socket_recv(sock)
-
-# проверка хэша ключа
-if criptography.is_hash_equal(h1, hash):
-    socket_send(sock, "OK")
-else:
-    socket_send(sock, "ERROR")
-    print("Возникла ошибка аутентификации! Отключение от сервера...")
-    socket_send(sock, "SHUTDOWN")
-    sock.close()
-    exit(0)
+# print(f"Connecting as '{username}' to '127.0.0.1:{port}'...")
+# sock = socket.socket()
+#
+# sock.connect(('127.0.0.1', port))
+# socket_send(sock, "username", username.encode('utf-8'))
+#
+# # генерация ключа и отправка его на сервер
+# private_key, public_key = criptography.key_generate()
+# pr_len, pu_len = len(private_key), len(public_key)
+# hash = criptography.hashing_key(public_key).digest()
+# hash_len = len(hash)
+# socket_send(sock, f"publickeyhash;{pu_len}", public_key + hash)
+#
+# # прием хэша с сервера для проверки
+# _, h1 = socket_recv(sock)
+#
+# # проверка хэша ключа
+# if criptography.is_hash_equal(h1, hash):
+#     socket_send(sock, "OK")
+# else:
+#     socket_send(sock, "ERROR")
+#     print("Возникла ошибка аутентификации! Отключение от сервера...")
+#     socket_send(sock, "SHUTDOWN")
+#     sock.close()
+#     exit(0)
 
 # Создание потока прослушивания сообщений
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
 
-checker = threading.Thread(target=check_timetable, args=[sock])
+checker = threading.Thread(target=check_timetable, args=[sock, serverport, username])
 checker.start()
 
 # sock = socket.socket()
@@ -321,5 +387,6 @@ menu.show()
 print("Exit routine...")
 socket_send(sock, "SHUTDOWN")
 listener.join()
+checker.join()
 sock.close()
 # закрыть порт надо именно, не просто закрыть сокет
