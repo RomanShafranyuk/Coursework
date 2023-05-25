@@ -4,24 +4,25 @@ import json
 import criptography
 from socketmessage import *
 import logging
-
+from time import sleep
+socket.setdefaulttimeout(10)
 
 def handle_client(sock: socket.socket, addr: tuple):
     """
-    Осуществяет подключение клиентов и обмен ключами между ними
+    Осуществляет подключение клиентов и обмен ключами между ними
 
     Параметры: 
 
-    sock: сокет клиента
+    sock: Сокет клиента
     addr: IP адрес и порт клиента
 
     """
-    global online_users_list, online_users_list_lock, message_storage
+    global online_users_list, online_users_list_lock, message_storage, is_online_flag
 
     # Приём имени при подключении клиента
     _, username_raw = socket_recv(sock)
     username = username_raw.decode('utf-8')
-    logging.info(f"({username}) joined from ({addr})!")
+    logging.info(f"({username}) joined from ({addr[0]}, {addr[1]})!")
 
     # ожидание приема ключа с клиента и вытягивание хэша с сообщения
     header, data = socket_recv(sock)
@@ -47,12 +48,44 @@ def handle_client(sock: socket.socket, addr: tuple):
         socket_send(sock, "SHUTDOWN")
         sock.close()
         return
-
+    
+    is_timeout = False
     # Основной цикл
     while True:
 
         # Прием сообщения с клиента
-        header, data = socket_recv(sock)
+        try:
+            header, data = socket_recv(sock)
+            if len(header[0]) == 0:
+                raise socket.timeout
+        except ConnectionResetError as err:
+            logging.error(f"[Errno {err.errno}] Клиент ({username}) принудительно разорвал соединение!")
+            break
+        except ConnectionAbortedError as err:
+            logging.error(f"[Errno {err.errno}] Программа на хост-компьютере разорвала соединение!")
+            break
+        except socket.timeout:
+            is_timeout = True
+        except Exception:
+            logging.info('Uncaught exception when receiving message from client')
+        
+        if is_timeout:
+            try:
+                socket_send(sock, "ping")
+                socket_recv(sock)
+                logging.info(f"({username}) is online!")
+                is_timeout = False
+                continue
+            except Exception as err:
+                logging.info(f"Disconnecting ({username})...")
+                online_users_list_lock.acquire()
+                user_index = online_users_list[0].index(username)
+                online_users_list[0].pop(user_index)
+                online_users_list[1].pop(user_index)
+                online_users_list[2].pop(user_index)
+                online_users_list_lock.release()
+                sock.close()
+                return
 
         # Обработка запроса ключа клиента
         if header[0] == "getkey":
@@ -84,7 +117,7 @@ def handle_client(sock: socket.socket, addr: tuple):
 
          # Обработка запроса отключения клиента
         elif header[0] == "SHUTDOWN":
-            logging.info(f"Disconnecting ({username})...")
+            # logging.info(f"Disconnecting ({username})...")
             socket_send(sock, "SHUTDOWN")
             break
 
@@ -100,13 +133,9 @@ def handle_client(sock: socket.socket, addr: tuple):
         
         elif header[0] == "ping":
             socket_send(sock, "pong")
-            
-            # data_json = json.loads(data.decode('utf-8'))
-            # message_storage_lock.acquire()
-            # message_storage.append(data_json)
-            # message_storage_lock.release()
 
     # Удаление отключенного клиента
+    logging.info(f"Disconnecting ({username})...")
     online_users_list_lock.acquire()
     user_index = online_users_list[0].index(username)
     online_users_list[0].pop(user_index)
@@ -142,11 +171,11 @@ def send_messages():
                 break
         message_storage_lock.release()
         online_users_list_lock.release()
-
+            
 
 # список онлайн пользователей
-# username, socket, public key
-online_users_list = [[], [], []]
+# username, socket, public key, is_online
+online_users_list = [[], [], [], []]
 
 # блокирование логов
 online_users_list_lock = threading.Lock()
@@ -177,16 +206,17 @@ print(f"[INFO] Listening on {config['address']}:{config['port']}")
 msg_thread = threading.Thread(target=send_messages)
 msg_thread.start()
 
-logging.basicConfig(format='[%(levelname)s] %(funcName)s:%(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s [%(levelname)s] %(funcName)s:%(message)s', level=logging.INFO, datefmt='%H:%M:%S')
 # основной цикл
 try:
     while True:
-        # принимаем клиентов
-        client_socket, client_address = server_socket.accept()
+        try:
+            client_socket, client_address = server_socket.accept()
+            tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
+            tmp_thread.start()
+        except Exception:
+            pass
 
-        # Вызываем обработчик клиента для каждого клиента
-        tmp_thread = threading.Thread(target=handle_client, args=[client_socket, client_address])
-        tmp_thread.start()
 except KeyboardInterrupt:
     logging.info('KeyboardInterrupt, closing server...')
 except Exception as ex:
