@@ -56,7 +56,7 @@ def check_timetable(server_address, username):
             sleep(5)
             print("Подключаемся обратно к серверу...")
             sock = socket.socket()
-            connect_to_server(server_address[0], server_address[1])
+            connect_to_server(username, server_address[0], server_address[1])
             listener = threading.Thread(target=listen_to_server, args=[sock])
             listener.start()
             timetable_shutdown = False
@@ -85,7 +85,16 @@ def send_message(my_username):
         pass
 
     # выбор клиента для отправки сообщений, или отмена отправки
-    receiver_index = SelectionMenu.get_selection(online_users_list, "Send to...")
+    while True:
+        try:
+            receiver_index = SelectionMenu.get_selection(online_users_list, "Send to...")
+            break
+        except KeyboardInterrupt:
+            test_prompt = prompt_utils.PromptUtils(Screen())
+            print("Не нажимайте сочетание клавиш [Ctrl+C]!")
+            playsound.playsound("sound_ctrlc.mp3", True)
+            test_prompt.enter_to_continue()
+
     if receiver_index >= len(online_users_list):
         notsend_prompt = prompt_utils.PromptUtils(Screen())
         print("[INFO] No message was sent!")
@@ -113,7 +122,7 @@ def send_message(my_username):
         # шифрование RSA
         enc_message = criptography.encrypt_message(test_prompt.input("Text").input_string.encode("utf-8"), receiver_key)
         socket_send(sock, f"message;{my_username};{online_users_list[receiver_index]}", enc_message)
-        print(enc_message)
+        # print(enc_message)
         test_prompt.enter_to_continue()
     else:
         print("Ошибка! Отключение клиента...")
@@ -168,7 +177,7 @@ def listen_to_server(my_sock: socket.socket):
 
         # Прием списка онлайн-пользователей
         elif headers[0] == "onlineusers":
-            print("[INFO] Got users list!")
+            # print("[INFO] Got users list!")
             online_users_list = json.loads(data.decode("utf-8"))
 
         elif headers[0] == "ping":

@@ -73,7 +73,7 @@ def handle_client(sock: socket.socket, addr: tuple):
             try:
                 socket_send(sock, "ping")
                 socket_recv(sock)
-                logging.info(f"({username}) is online!")
+                # logging.info(f"({username}) is online!")
                 is_timeout = False
                 continue
             except Exception as err:
