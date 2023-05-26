@@ -119,8 +119,17 @@ def send_message(my_username):
 
     if answer == "OK":
         test_prompt = prompt_utils.PromptUtils(Screen())
+        while True:
+            try:
+                message_input = test_prompt.input("Text").input_string
+                break
+            except KeyboardInterrupt:
+                test_prompt = prompt_utils.PromptUtils(Screen())
+                print("Не нажимайте сочетание клавиш [Ctrl+C]!")
+                playsound.playsound("sound_ctrlc.mp3", True)
+                test_prompt.enter_to_continue()
         # шифрование RSA
-        enc_message = criptography.encrypt_message(test_prompt.input("Text").input_string.encode("utf-8"), receiver_key)
+        enc_message = criptography.encrypt_message(message_input.encode("utf-8"), receiver_key)
         socket_send(sock, f"message;{my_username};{online_users_list[receiver_index]}", enc_message)
         # print(enc_message)
         test_prompt.enter_to_continue()
