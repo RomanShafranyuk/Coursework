@@ -197,7 +197,7 @@ def listen_to_server(my_sock: socket.socket):
             break
 
 
-def connect_to_server(address: str, port: int):
+def connect_to_server(username, address, port):
     global sock, private_key, public_key
 
     sock.connect((address, port))
@@ -243,18 +243,19 @@ answer = ""
 parser = argparse.ArgumentParser(description="Chat client")
 parser.add_argument('username')
 parser.add_argument('-p', dest='port', type=int, default=7001, required=False)
+parser.add_argument('-a', dest='address', type=str, default="127.0.0.1", required=False)
 args = parser.parse_args()
 
 # подключение
-username, serverport = args.username, args.port
+username, address, port = args.username, args.address, args.port
 sock = socket.socket()
 print("Подключение к серверу...")
-connect_to_server('127.0.0.1', serverport)
+connect_to_server(username, address, port)
 # Создание потока прослушивания сообщений
 listener = threading.Thread(target=listen_to_server, args=[sock])
 listener.start()
 
-timetable_monitor = threading.Thread(target=check_timetable, args=[('127.0.0.1', serverport), username])
+timetable_monitor = threading.Thread(target=check_timetable, args=[(address, port), username])
 timetable_monitor.start()
 
 print(f"Добро пожаловать, '{username}'!")
